@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amharic OCR - Fidel Scanner</title>
     
+    <!-- Mobile Home Screen Icon and Web App Config -->
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3067/3067451.png">
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3067/3067451.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Fidel Scanner">
+    
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -249,7 +256,7 @@
                     {/* Main Container - Side-by-Side on md and up */}
                     <div className="w-full max-w-7xl flex flex-col md:flex-row gap-6 items-stretch">
                         
-                        {/* LEFT Card: Source - Force min-height to ensure it looks large */}
+                        {/* LEFT Card: Source */}
                         <div className="w-full md:w-1/2 p-6 md:p-8 bg-white rounded-3xl shadow-xl border border-gray-100 flex flex-col min-h-[550px] md:min-h-[700px]">
                             
                             <div className="flex items-center justify-between mb-6">
@@ -327,7 +334,7 @@
                             )}
                         </div>
 
-                        {/* RIGHT Card: Result - Spacious for long texts */}
+                        {/* RIGHT Card: Result */}
                         <div className="w-full md:w-1/2 p-6 md:p-8 bg-white rounded-3xl shadow-xl border border-gray-100 flex flex-col min-h-[600px] md:min-h-[700px]">
                             <div className="flex justify-between items-center mb-6">
                                 <h2 className="text-xl font-bold text-gray-800 flex items-center">
@@ -381,21 +388,21 @@
                         </div>
                     </div>
                     
-                    {/* Footer with credit */}
-                     <footer className="mt-12 text-center text-gray-400 text-sm pb-10">
+                    {/* Footer */}
+                    <footer className="mt-12 text-center text-gray-400 text-sm pb-10">
                         <p>Powered by Tesseract.js • Processing happens locally in your browser</p>
                         <p className="mt-2 font-bold italic text-gray-500 uppercase tracking-widest text-[10px]">
                             compiled by <a href="https://tiktok.com/@aye_technology" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 underline">@aye_technology</a>
                         </p>
                     </footer>
-
-                </div>
-            );
+                </div>            );        }
+        
+        // Final safeguard for ReactDOM initialization
+        const rootElement = document.getElementById('root');
+        if (rootElement) {
+            const root = ReactDOM.createRoot(rootElement);
+            root.render(<App />);
         }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
     </script>
 </body>
 </html>
-
