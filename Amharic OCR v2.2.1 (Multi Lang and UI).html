@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amharic OCR - Fidel Scanner</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Tesseract.js -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+    <!-- Google Fonts: Noto Sans Ethiopic for Amharic support -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .amharic-text {
+            font-family: 'Noto Sans Ethiopic', sans-serif;
+        }
+        /* Custom scrollbar for text areas */
+        textarea::-webkit-scrollbar {
+            width: 8px;
+        }
+        textarea::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        textarea::-webkit-scrollbar-thumb {
+            background: #d1d5db; 
+            border-radius: 4px;
+        }
+        textarea::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af; 
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .pdf-page-preview {
+            max-height: 150px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Configure PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        function App() {
+            const [image, setImage] = useState(null);
+            const [text, setText] = useState("");
+            const [progress, setProgress] = useState(0);
+            const [status, setStatus] = useState("idle"); // idle, processing, complete, error
+            const [statusMessage, setStatusMessage] = useState("");
+            const [dragActive, setDragActive] = useState(false);
+            const [fileType, setFileType] = useState(null);
+            const [pdfPages, setPdfPages] = useState([]);
+            const [selectedPages, setSelectedPages] = useState([]);
+            const [language, setLanguage] = useState('amh');
+            const fileInputRef = useRef(null);
+
+            const handleDrag = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.type === "dragenter" || e.type === "dragover") {
+                    setDragActive(true);
+                } else if (e.type === "dragleave") {
+                    setDragActive(false);
+                }
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragActive(false);
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleFile(e.dataTransfer.files[0]);
+                }
+            };
+
+            const handleChange = (e) => {
+                e.preventDefault();
+                if (e.target.files && e.target.files[0]) {
+                    handleFile(e.target.files[0]);
+                }
+            };
+
+            const handleFile = async (file) => {
+                if (file.type === 'application/pdf') {
+                    setFileType('pdf');
+                    await loadPDF(file);
+                } else if (file.type.match('image.*')) {
+                    setFileType('image');
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        setImage(e.target.result);
+                        setText("");
+                        setStatus("idle");
+                        setProgress(0);
+                        setStatusMessage("");
+                        setPdfPages([]);
+                        setSelectedPages([]);
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    alert("Please upload an image file (PNG, JPG, JPEG) or PDF.");
+                    return;
+                }
+            };
+
+            const loadPDF = async (file) => {
+                try {
+                    setStatus("processing");
+                    setStatusMessage("Loading PDF...");
+                    
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    
+                    const pages = [];
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const viewport = page.getViewport({ scale: 1.5 });
+                        
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        
+                        await page.render({
+                            canvasContext: context,
+                            viewport: viewport
+                        }).promise;
+                        
+                        pages.push({
+                            number: i,
+                            dataUrl: canvas.toDataURL()
+                        });
+                    }
+                    
+                    setPdfPages(pages);
+                    setSelectedPages(pages.map(p => p.number));
+                    setImage(pages[0].dataUrl);
+                    setText("");
+                    setStatus("idle");
+                    setStatusMessage(`Loaded ${pages.length} page${pages.length > 1 ? 's' : ''}`);
+                    setProgress(0);
+                } catch (err) {
+                    console.error("PDF loading error:", err);
+                    setStatus("error");
+                    setStatusMessage("Failed to load PDF");
+                }
+            };
+
+            const performOCR = async () => {
+                if (!image && pdfPages.length === 0) return;
+
+                setStatus("processing");
+                setText("");
+                
+                try {
+                    const worker = await Tesseract.createWorker(language, 1, {
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                setProgress(Math.round(m.progress * 100));
+                                setStatusMessage(`Scanning... ${Math.round(m.progress * 100)}%`);
+                            }
+                        }
+                    });
+
+                    if (fileType === 'pdf' && pdfPages.length > 0) {
+                        const pagesToProcess = pdfPages.filter(p => selectedPages.includes(p.number));
+                        
+                        if (pagesToProcess.length === 0) {
+                            setStatus("error");
+                            setStatusMessage("Select a page");
+                            await worker.terminate();
+                            return;
+                        }
+
+                        let combinedText = "";
+                        
+                        for (let i = 0; i < pagesToProcess.length; i++) {
+                            const page = pagesToProcess[i];
+                            setStatusMessage(`Page ${i + 1}/${pagesToProcess.length}...`);
+                            setProgress(0);
+                            
+                            const { data: { text } } = await worker.recognize(page.dataUrl);
+                            combinedText += `\n--- Page ${page.number} ---\n${text}\n`;
+                        }
+                        
+                        setText(combinedText.trim());
+                    } else {
+                        setStatusMessage("Scanning image...");
+                        const { data: { text } } = await worker.recognize(image);
+                        setText(text);
+                    }
+                    
+                    setStatus("complete");
+                    setStatusMessage("Completed");
+                    await worker.terminate();
+                } catch (err) {
+                    console.error(err);
+                    setStatus("error");
+                    setStatusMessage("Error: " + err.message);
+                }
+            };
+
+            const copyToClipboard = () => {
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    const originalMsg = statusMessage;
+                    setStatusMessage("Copied to clipboard!");
+                    setTimeout(() => setStatusMessage("Completed"), 2000);
+                } catch (err) {
+                    console.error('Unable to copy', err);
+                }
+                document.body.removeChild(textArea);
+            };
+
+            const downloadText = () => {
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'fidel-extracted-text.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const clearAll = () => {
+                setImage(null);
+                setText("");
+                setStatus("idle");
+                setProgress(0);
+                setStatusMessage("");
+                setFileType(null);
+                setPdfPages([]);
+                setSelectedPages([]);
+                if(fileInputRef.current) fileInputRef.current.value = "";
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center py-10 px-4 sm:px-6 lg:px-8">
+                    
+                    {/* Header */}
+                    <div className="text-center mb-10">
+                        <div className="flex justify-center mb-4">
+                            <div className="bg-indigo-600 p-3 rounded-xl shadow-lg">
+                                <i className="ph ph-scan text-white text-3xl"></i>
+                            </div>
+                        </div>
+                        <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight sm:text-5xl mb-2">
+                            Fidel Scanner
+                        </h1>
+                        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                            Convert Amharic, Tigrinya, Afaan Oromoo & English documents to editable text instantly.
+                        </p>
+                    </div>
+
+                    {/* Main Content: Split into two separate cards for desktop */}
+                    <div className="w-full max-w-6xl flex flex-col md:flex-row gap-6 lg:gap-8 min-h-[600px] items-stretch">
+                        
+                        {/* Left Card: Upload & Preview */}
+                        <div className="w-full md:w-1/2 p-6 md:p-8 bg-white rounded-3xl shadow-xl border border-gray-100 flex flex-col min-h-[400px]">
+                            
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                                    <i className="ph ph-image mr-2 text-indigo-600"></i>
+                                    Source {fileType === 'pdf' ? 'PDF' : 'Image'}
+                                </h2>
+                                
+                                <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg shadow-sm border border-gray-200">
+                                    <i className="ph ph-translate text-indigo-600"></i>
+                                    <select 
+                                        value={language}
+                                        onChange={(e) => setLanguage(e.target.value)}
+                                        className="text-sm font-semibold text-gray-700 bg-transparent border-none focus:outline-none cursor-pointer"
+                                    >
+                                        <option value="amh">Amharic (አማርኛ)</option>
+                                        <option value="tir">Tigrinya (ትግርኛ)</option>
+                                        <option value="orm">Afaan Oromoo</option>
+                                        <option value="eng">English</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {!image ? (
+                                <div 
+                                    className={`flex-1 flex flex-col items-center justify-center border-3 border-dashed rounded-2xl transition-all duration-200 cursor-pointer ${
+                                        dragActive 
+                                            ? "border-indigo-500 bg-indigo-50" 
+                                            : "border-gray-300 hover:border-indigo-400 hover:bg-gray-100"
+                                    }`}
+                                    onDragEnter={handleDrag}
+                                    onDragLeave={handleDrag}
+                                    onDragOver={handleDrag}
+                                    onDrop={handleDrop}
+                                    onClick={() => fileInputRef.current.click()}
+                                >
+                                    <input 
+                                        ref={fileInputRef}
+                                        type="file" 
+                                        className="hidden" 
+                                        accept="image/*,application/pdf"
+                                        onChange={handleChange}
+                                    />
+                                    <i className="ph ph-upload-simple text-5xl text-gray-400 mb-4"></i>
+                                    <p className="text-lg font-medium text-gray-700 mb-1">Click to upload or drag & drop</p>
+                                    <p className="text-sm text-gray-500">JPG, PNG, GIF or PDF</p>
+                                </div>
+                            ) : (
+                                <div className="flex-1 flex flex-col relative">
+                                    {fileType === 'pdf' ? (
+                                        <div className="flex-1 flex flex-col overflow-y-auto max-h-[450px] mb-4 pr-2">
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                {pdfPages.map((page) => (
+                                                    <div 
+                                                        key={page.number}
+                                                        onClick={() => setSelectedPages(prev => prev.includes(page.number) ? prev.filter(p => p !== page.number) : [...prev, page.number])}
+                                                        className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                                                            selectedPages.includes(page.number) ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-gray-200'
+                                                        }`}
+                                                    >
+                                                        <div className="pdf-page-preview bg-gray-100">
+                                                            <img src={page.dataUrl} className="w-full h-full object-cover" />
+                                                        </div>
+                                                        <div className={`absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center ${selectedPages.includes(page.number) ? 'bg-indigo-600' : 'bg-white border'}`}>
+                                                            {selectedPages.includes(page.number) && <i className="ph ph-check text-white text-[10px]"></i>}
+                                                        </div>
+                                                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] py-0.5 text-center">P{page.number}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex-1 bg-gray-100 rounded-xl overflow-hidden relative shadow-inner flex items-center justify-center mb-4">
+                                            <img 
+                                                src={image} 
+                                                alt="Preview" 
+                                                className="max-w-full max-h-[400px] object-contain" 
+                                            />
+                                        </div>
+                                    )}
+                                    
+                                    <div className="mt-auto space-y-3">
+                                        <button 
+                                            onClick={clearAll}
+                                            className="w-full bg-white hover:bg-gray-50 text-red-500 py-2.5 px-4 rounded-xl shadow-sm transition-colors border border-gray-200 flex items-center justify-center gap-2 font-semibold"
+                                        >
+                                            <i className="ph ph-trash text-lg"></i>
+                                            Clear and Start Over
+                                        </button>
+                                        
+                                        <button
+                                            onClick={performOCR}
+                                            disabled={status === 'processing' || (fileType === 'pdf' && selectedPages.length === 0)}
+                                            className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transform transition-all flex items-center justify-center gap-2 ${
+                                                status === 'processing' || (fileType === 'pdf' && selectedPages.length === 0)
+                                                    ? 'bg-gray-400 cursor-not-allowed text-white'
+                                                    : 'bg-indigo-600 hover:bg-indigo-700 text-white hover:scale-[1.01]'
+                                            }`}
+                                        >
+                                            {status === 'processing' ? (
+                                                <>
+                                                    <i className="ph ph-spinner spinner text-2xl"></i>
+                                                    Processing...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <i className="ph ph-magic-wand text-2xl"></i>
+                                                    Extract Text
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Right Card: Result */}
+                        <div className="w-full md:w-1/2 p-6 md:p-8 bg-white rounded-3xl shadow-xl border border-gray-100 flex flex-col">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                                    <i className="ph ph-text-aa mr-2 text-indigo-600"></i>
+                                    Extracted Text
+                                </h2>
+                                {statusMessage && (
+                                    <span className={`text-sm font-medium px-3 py-1 rounded-full ${
+                                        status === 'error' ? 'bg-red-100 text-red-600' : 
+                                        status === 'complete' ? 'bg-green-100 text-green-600' : 
+                                        'bg-blue-100 text-blue-600'
+                                    }`}>
+                                        {statusMessage}
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="flex-1 relative mb-6 min-h-[350px]">
+                                <textarea
+                                    className="w-full h-full p-5 border border-gray-200 bg-gray-50/30 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg leading-relaxed text-gray-800 amharic-text shadow-inner"
+                                    placeholder={status === 'idle' ? "Recognized text will appear here..." : "Processing..."}
+                                    value={text}
+                                    onChange={(e) => setText(e.target.value)}
+                                    readOnly={status === 'processing'}
+                                ></textarea>
+                                
+                                {status === 'processing' && (
+                                    <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl z-10">
+                                        <div className="w-64 bg-gray-200 rounded-full h-2 mb-4 overflow-hidden">
+                                            <div 
+                                                className="bg-indigo-600 h-2 rounded-full transition-all duration-300 ease-out"
+                                                style={{ width: `${progress}%` }}
+                                            ></div>
+                                        </div>
+                                        <p className="text-gray-600 font-medium animate-pulse">{statusMessage}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex gap-4">
+                                <button
+                                    onClick={copyToClipboard}
+                                    disabled={!text}
+                                    className={`flex-1 py-4 px-6 rounded-2xl font-bold border transition-all flex items-center justify-center gap-2 ${
+                                        !text 
+                                            ? 'border-gray-100 text-gray-300 cursor-not-allowed bg-gray-50' 
+                                            : 'border-gray-200 text-gray-700 hover:bg-gray-50 hover:shadow-md active:scale-95'
+                                    }`}
+                                >
+                                    <i className="ph ph-copy text-xl"></i>
+                                    Copy Text
+                                </button>
+                                
+                                <button
+                                    onClick={downloadText}
+                                    disabled={!text}
+                                    className={`flex-1 py-4 px-6 rounded-2xl font-bold border transition-all flex items-center justify-center gap-2 ${
+                                        !text 
+                                            ? 'border-gray-100 text-gray-300 cursor-not-allowed bg-gray-50' 
+                                            : 'border-gray-200 text-gray-700 hover:bg-gray-50 hover:shadow-md active:scale-95'
+                                    }`}
+                                >
+                                    <i className="ph ph-download text-xl"></i>
+                                    Download
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {/* Footer */}
+                    <div className="mt-8 text-center text-gray-400 text-sm">
+                        <p>Powered by Tesseract.js & PDF.js • Processing happens locally in your browser</p>
+                        <p className="mt-1 font-medium italic">compiled by @aye_technology</p>
+                    </div>
+
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
